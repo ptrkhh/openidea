@@ -1,0 +1,64 @@
+name: Android release
+
+# For each `v*-android` tag (an upstream release with the Android commit on top): an arm64 APK signed
+# with the ANDROID_KEYSTORE (base64 .jks) and ANDROID_KEYSTORE_PASSWORD secrets, published as a release.
+# Run it by hand on the tag if pushing the tag didn't start it.
+on:
+  push:
+    tags: ["v*-android"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # No LTO and parallel codegen: builds in a fraction of the desktop release time.
+  CARGO_PROFILE_RELEASE_LTO: "false"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift /usr/local/share/boost
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v5
+        with: { version: 11 }
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, cache: pnpm }
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: 21 }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: aarch64-linux-android }
+      - uses: Swatinem/rust-cache@v2
+        with: { key: android, cache-on-failure: true }
+      - run: pnpm install --frozen-lockfile
+      - name: Build
+        run: NDK_HOME="$ANDROID_NDK_LATEST_HOME" pnpm exec tauri android build --apk --target aarch64
+      - name: Sign
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)/apksigner"
+          "$apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-pass env:KEYSTORE_PASSWORD \
+            --out "OpenIDEA_${GITHUB_REF_NAME#v}_arm64.apk" \
+            src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+      - name: Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          upstream="${GITHUB_REF_NAME%-android}"
+          gh release create "$GITHUB_REF_NAME" OpenIDEA_*_arm64.apk --title "OpenIDEA ${upstream#v} for Android" \
+            --notes "Upstream [$upstream](https://github.com/l0ng-ai/openidea/releases/tag/$upstream) with the Android build on top. Install the APK over the previous one."
+      - uses: actions/upload-artifact@v4
+        if: github.ref_type != 'tag'
+        with:
+          name: openidea-android-arm64
+          path: OpenIDEA_*_arm64.apk
+          retention-days: 7

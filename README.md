@@ -1,3 +1,75 @@
+> [!IMPORTANT]
+> **This fork is the Android edition of [OpenIDEA](https://github.com/l0ng-ai/openidea).** Every release here is an upstream release with the Android build on top. Download the APK from [Releases](https://github.com/ptrkhh/openidea/releases) and install it over the previous one. Below this section, the README is upstream's.
+
+## Android edition: making a release
+
+### Branches
+
+| Branch | What it holds |
+| --- | --- |
+| `feat/android-termux` | One commit: the Android build (also [PR #1253](https://github.com/l0ng-ai/openidea/pull/1253) upstream). It always sits on an upstream release tag. |
+| `android-apk` (default) | That commit plus one more: this README section and the release workflow (`.github/workflows/android.yml`). Releases are tagged here. |
+| `main` | Not used. |
+
+### One-time setup
+
+```sh
+git clone https://github.com/ptrkhh/openidea.git && cd openidea
+git remote add upstream https://github.com/l0ng-ai/openidea.git
+git switch feat/android-termux   # creates the local branch from origin
+git switch android-apk
+```
+
+The workflow signs the APK with two repository secrets: `ANDROID_KEYSTORE` (the `.jks` file, base64) and `ANDROID_KEYSTORE_PASSWORD`. Keep that keystore safe: Android installs an update only if it is signed with the same key as the installed app.
+
+### When upstream publishes a release
+
+Example: upstream publishes `v0.1.51`. Replace `0.1.51` with the real version everywhere below.
+
+1. **Fetch** upstream's release tag and this fork's branches:
+   ```sh
+   git fetch upstream --tags
+   git fetch origin
+   ```
+2. **Move the Android commit** onto the release:
+   ```sh
+   git switch feat/android-termux
+   git reset --hard origin/feat/android-termux
+   git rebase v0.1.51
+   ```
+   If git stops on conflicts: fix the files it lists, `git add` them, then `git rebase --continue` (or `git rebase --abort` to start over).
+3. **Move the release commit** on top of it:
+   ```sh
+   git switch android-apk
+   git reset --hard origin/android-apk
+   git rebase --onto feat/android-termux android-apk~1
+   ```
+4. **Push** both branches:
+   ```sh
+   git push --force-with-lease origin feat/android-termux android-apk
+   ```
+5. **Tag** the release. Pushing the tag starts the build:
+   ```sh
+   git tag v0.1.51-android android-apk
+   git push origin v0.1.51-android
+   ```
+6. **Wait** for Actions → "Android release" to finish (about 25 minutes). The APK then appears under [Releases](https://github.com/ptrkhh/openidea/releases) as `OpenIDEA_0.1.51-android_arm64.apk`.
+
+### If the build fails
+
+Usually upstream added window or desktop code that Android doesn't have; the log names the file and line. Fix it on `feat/android-termux`, then:
+
+```sh
+git switch feat/android-termux && git commit -a --amend --no-edit
+git switch android-apk && git rebase --onto feat/android-termux android-apk~1
+git push --force-with-lease origin feat/android-termux android-apk
+git tag -f v0.1.51-android android-apk && git push -f origin v0.1.51-android
+```
+
+If a release already exists for that tag, delete it first (Releases → the release → Delete). If pushing the tag doesn't start a build, start it by hand: Actions → "Android release" → Run workflow → pick the tag.
+
+---
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="src-tauri/icons/source/openidea-wordmark-dark.svg">
